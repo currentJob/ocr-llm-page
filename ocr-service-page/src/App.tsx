@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { KoreanOCR } from './ocr/pipeline'
 import type { OcrItem, LoadProgress } from './ocr/pipeline'
+import { GlmOCR } from './ocr/glm-pipeline'
 import { loadLLM, summarize, isLLMLoaded } from './llm/engine'
 import type { LLMLoadProgress } from './llm/engine'
 import './App.css'
+
+type OcrModelType = 'ppocr' | 'glm-ocr'
 
 const COLORS = [
   '#3b82f6','#10b981','#f59e0b','#ef4444',
@@ -52,8 +55,9 @@ export default function App() {
   const [copyFeedback, setCopyFeedback] = useState(false)
   const [fileQueue, setFileQueue]       = useState<File[]>([])
   const [currentFilename, setCurrentFilename] = useState('')
+  const [modelType, setModelType]       = useState<OcrModelType>('ppocr')
 
-  const ocrRef         = useRef<KoreanOCR | null>(null)
+  const ocrRef         = useRef<KoreanOCR | GlmOCR | null>(null)
   const imgRef         = useRef<HTMLImageElement>(null)
   const canvasRef      = useRef<HTMLCanvasElement>(null)
   const loadedImgRef   = useRef<HTMLImageElement | null>(null)
@@ -65,10 +69,33 @@ export default function App() {
   const streamRef      = useRef<MediaStream | null>(null)
   const editInputRef   = useRef<HTMLInputElement>(null)
 
+  async function loadModel(type: OcrModelType, hadImage = false) {
+    ocrRef.current = null
+    setPhase('loading-model')
+    setProgress(null)
+    try {
+      if (type === 'ppocr') {
+        ocrRef.current = await KoreanOCR.create(p => setProgress(p))
+      } else {
+        ocrRef.current = await GlmOCR.create(p => setProgress(p))
+      }
+      setPhase(hadImage ? 'roi' : 'ready')
+    } catch (e) {
+      setError(String(e))
+      setPhase('error')
+    }
+  }
+
+  async function switchModel(type: OcrModelType) {
+    if (type === modelType || phase === 'loading-model') return
+    setModelType(type)
+    setItems([])
+    setSelected(new Set())
+    await loadModel(type, imageUrl !== null)
+  }
+
   useEffect(() => {
-    KoreanOCR.create(p => setProgress(p))
-      .then(ocr => { ocrRef.current = ocr; setPhase('ready') })
-      .catch(e  => { setError(String(e));  setPhase('error') })
+    loadModel('ppocr')
     return () => { streamRef.current?.getTracks().forEach(t => t.stop()) }
   }, [])
 
@@ -406,6 +433,24 @@ export default function App() {
         <div className="header-inner">
           <h1>Korean OCR</h1>
           <p>브라우저에서 직접 실행 — 서버 없이 한국어 텍스트 인식</p>
+          <div className="model-selector">
+            <button
+              className={`model-btn${modelType === 'ppocr' ? ' active' : ''}`}
+              onClick={() => switchModel('ppocr')}
+              disabled={phase === 'loading-model'}
+              title="PP-OCRv5 한국어 특화 4단계 파이프라인"
+            >
+              PP-OCR
+            </button>
+            <button
+              className={`model-btn${modelType === 'glm-ocr' ? ' active' : ''}`}
+              onClick={() => switchModel('glm-ocr')}
+              disabled={phase === 'loading-model'}
+              title="GLM-OCR ONNX 인식 모델"
+            >
+              GLM-OCR
+            </button>
+          </div>
           {history.length > 0 && (
             <button className="history-toggle" onClick={() => setShowHistory(s => !s)}>
               <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
@@ -462,7 +507,7 @@ export default function App() {
         {isLoading && (
           <div className="center-card">
             <span className="spinner lg" />
-            <p className="loading-title">모델 로딩 중</p>
+            <p className="loading-title">{modelType === 'glm-ocr' ? 'GLM-OCR' : 'PP-OCR'} 모델 로딩 중</p>
             {progress && (<>
               <p className="loading-step">{progress.step}</p>
               <div className="progress-bar">

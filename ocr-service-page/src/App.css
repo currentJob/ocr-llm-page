@@ -49,6 +49,34 @@ body {
 }
 .header p { margin-top: .4rem; color: var(--text-2); font-size: .88rem; }
 
+/* ── 모델 셀렉터 ──────────────────────────────────────────────── */
+
+.model-selector {
+  display: inline-flex; align-items: center;
+  margin-top: .65rem;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  padding: 3px;
+  gap: 2px;
+}
+.model-btn {
+  padding: .26rem .9rem;
+  border-radius: 9999px;
+  font-size: .75rem; font-weight: 600;
+  background: transparent; border: none;
+  color: var(--text-3); cursor: pointer;
+  transition: background .2s, color .2s, box-shadow .2s;
+  white-space: nowrap;
+}
+.model-btn:hover:not(:disabled) { color: var(--text-2); }
+.model-btn.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(59,130,246,.35);
+}
+.model-btn:disabled { opacity: .45; cursor: not-allowed; }
+
 .history-toggle {
   display: inline-flex; align-items: center; gap: .35rem;
   margin-top: .7rem;

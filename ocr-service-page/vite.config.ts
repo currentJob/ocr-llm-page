@@ -34,8 +34,9 @@ const ortPublicMjsStub: Plugin = {
   },
   load(id: string) {
     if (id === '\0ort-stub') {
-      // import() 를 reject 시켜 ORT 의 try-catch 가 WASM 폴백하도록 유도
-      return 'throw new Error("ORT JSEP/JSPI/asyncify not available (stub)")'
+      // no-op async 함수를 export: import() 는 성공하고 ORT 가 default() 를 호출해도
+      // 아무 작업 없이 반환 → JSEP 초기화 미완료로 인식 → WASM 백엔드로 정상 진행
+      return 'export default async function() {}'
     }
   },
 }

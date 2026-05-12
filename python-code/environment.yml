@@ -1,0 +1,40 @@
+name: ocr-test
+
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.11
+  - pip
+
+  - pip:
+      - paddleocr==3.5.0
+      - paddlex==3.5.1
+      - paddlepaddle==3.1.1
+
+      - opencv-contrib-python
+      - pillow
+      - numpy
+      - pandas
+      - pypdfium2
+      - pyclipper
+      - shapely
+      - python-bidi
+      - PyYAML
+      - requests
+      - tqdm
+      - rich
+      - prettytable
+
+      - huggingface_hub
+      - modelscope
+      - aistudio-sdk
+      - safetensors
+
+      - paddle2onnx==2.1.0
+      - onnx==1.17.0
+      - onnxruntime==1.25.1
+      - onnxoptimizer
+      - onnx_graphsurgeon
+      - polygraphy

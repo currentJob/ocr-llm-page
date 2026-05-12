@@ -38,3 +38,9 @@ dependencies:
       - onnxoptimizer
       - onnx_graphsurgeon
       - polygraphy
+
+      # GLM-OCR 변환용 (PyTorch HuggingFace 경로)
+      - torch
+      - transformers
+      - accelerate
+      - sentencepiece

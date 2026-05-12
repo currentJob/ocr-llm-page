@@ -522,7 +522,7 @@ export default function App() {
           <div className="center-card">
             <div className="error-icon">✕</div>
             <p className="loading-title">모델 로딩 실패</p>
-            <p className="loading-step">{error}</p>
+            <p className="loading-step" style={{ whiteSpace: 'pre-line' }}>{error}</p>
           </div>
         )}
 

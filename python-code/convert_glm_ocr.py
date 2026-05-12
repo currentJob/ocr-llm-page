@@ -1,23 +1,32 @@
 """
-GLM-OCR 모델 다운로드 및 ONNX 변환 스크립트
+zai-org/GLM-OCR 다운로드 및 ONNX 변환 스크립트
 
-지원 변환 경로:
-  1. HuggingFace PyTorch 모델 → ONNX  (기본값)
-  2. PaddleOCR 추론 모델     → ONNX  (--paddle 옵션)
-  3. 로컬 .pt / .pth 체크포인트 → ONNX  (--checkpoint 옵션)
+모델 구조:
+  CogViT 비전 인코더 + GLM-0.5B 언어 디코더 (encoder-decoder VLM)
+  원본 크기: 약 2.65 GB (safetensors)
+
+ONNX 변환 결과 (optimum 사용):
+  encoder_model.onnx          - CogViT 이미지 인코더
+  decoder_model_merged.onnx   - GLM 디코더 (KV-cache 포함)
+  tokenizer.json 등 설정 파일
 
 사용법:
-  python convert_glm_ocr.py                                # HuggingFace 다운로드 + 변환
-  python convert_glm_ocr.py --model-id <hf-repo-id>       # HF 모델 ID 직접 지정
-  python convert_glm_ocr.py --paddle <paddle_model_dir>   # PaddleOCR 모델 변환
-  python convert_glm_ocr.py --checkpoint model.pt \\
-      --vocab vocab.txt                                    # 로컬 체크포인트 변환
+  # 1단계: 다운로드 + ONNX 변환 (처음 한 번)
+  python convert_glm_ocr.py
 
-필요 패키지 (PyTorch 경로):
-  pip install torch onnx==1.17.0 onnxruntime==1.25.1 huggingface_hub
+  # INT8 양자화 (변환 후 크기 축소, 약 650 MB)
+  python convert_glm_ocr.py --quantize
 
-필요 패키지 (PaddleOCR 경로):
-  pip install paddlepaddle paddle2onnx==2.1.0 onnxruntime==1.25.1
+  # 다운로드만 (변환 없이)
+  python convert_glm_ocr.py --download-only
+
+  # ONNX만 (이미 다운로드됨)
+  python convert_glm_ocr.py --skip-download
+
+필요 패키지:
+  pip install torch transformers optimum[exporters] onnx==1.17.0 onnxruntime==1.25.1
+  pip install huggingface_hub sentencepiece protobuf
+  (양자화) pip install optimum[onnxruntime]
 """
 
 from __future__ import annotations
@@ -25,381 +34,325 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import struct
+import subprocess
 import sys
 from pathlib import Path
 
 # ── 설정 ─────────────────────────────────────────────────────────────────────
-# 실제 HuggingFace 모델 ID로 교체하세요.
-# 예시: "THUDM/glm-ocr", "your-org/glm-ocr-korean", ...
-DEFAULT_HF_MODEL_ID = "THUDM/glm-ocr"
 
-# glm-pipeline.ts 와 반드시 일치해야 합니다.
-REC_H     = 64    # 인식 모델 입력 높이
-REC_MAX_W = 256   # 인식 모델 입력 최대 너비
-OPSET     = 11    # ONNX opset 버전
+HF_MODEL_ID   = "zai-org/GLM-OCR"
+OPSET         = 14      # VLM 은 opset 14 이상 필요
 
-# 경로
 SCRIPT_DIR    = Path(__file__).parent
-ONNX_DIR      = SCRIPT_DIR / "onnx_models" / "glm_ocr_rec"
-PUBLIC_MODELS = SCRIPT_DIR.parent / "ocr-service-page" / "public" / "models"
+HF_LOCAL      = SCRIPT_DIR / "hf_models" / "zai-org__GLM-OCR"
+ONNX_DIR      = SCRIPT_DIR / "onnx_models" / "glm_ocr"
+ONNX_INT8_DIR = SCRIPT_DIR / "onnx_models" / "glm_ocr_int8"
+PUBLIC_MODELS = SCRIPT_DIR.parent / "ocr-service-page" / "public" / "models" / "glm-ocr"
+
+# glm-pipeline.ts 에서 참조하는 파일 이름 (변경 금지)
+ENCODER_NAME         = "encoder_model.onnx"
+DECODER_MERGED_NAME  = "decoder_model_merged.onnx"
 
 
 # ── 유틸 ─────────────────────────────────────────────────────────────────────
 
-def _hr() -> None:
-    print("─" * 56)
+def _hr(title: str = "") -> None:
+    if title:
+        print(f"\n── {title} {'─' * max(0, 48 - len(title))}")
+    else:
+        print("─" * 56)
 
 
-def _ok(msg: str) -> None:
-    print(f"  [✓] {msg}")
+def _ok(msg: str)   -> None: print(f"  [✓] {msg}")
+def _skip(msg: str) -> None: print(f"  [-] {msg}")
+def _warn(msg: str) -> None: print(f"  [!] {msg}")
+def _fail(msg: str) -> None: print(f"  [✗] {msg}", file=sys.stderr)
 
 
-def _skip(msg: str) -> None:
-    print(f"  [-] {msg}")
-
-
-def _fail(msg: str) -> None:
-    print(f"  [✗] {msg}", file=sys.stderr)
+def _require(*packages: str) -> None:
+    missing = []
+    for pkg in packages:
+        try:
+            __import__(pkg.replace("-", "_"))
+        except ImportError:
+            missing.append(pkg)
+    if missing:
+        raise SystemExit(
+            f"패키지 미설치: {', '.join(missing)}\n"
+            f"  pip install {' '.join(missing)}"
+        )
 
 
 # ── 1. HuggingFace 다운로드 ──────────────────────────────────────────────────
 
-def download_hf(model_id: str, local_dir: Path) -> Path:
-    """HuggingFace Hub에서 모델을 다운로드합니다."""
-    try:
-        from huggingface_hub import snapshot_download
-    except ImportError:
-        raise SystemExit("huggingface_hub 미설치: pip install huggingface_hub")
+def download(local_dir: Path) -> Path:
+    _require("huggingface_hub")
+    from huggingface_hub import snapshot_download
 
-    if local_dir.exists() and any(local_dir.iterdir()):
+    marker = local_dir / ".download_complete"
+    if marker.exists():
         _skip(f"이미 다운로드됨: {local_dir}")
         return local_dir
 
     local_dir.mkdir(parents=True, exist_ok=True)
-    print(f"  HuggingFace 다운로드: {model_id}")
+    print(f"  모델 ID : {HF_MODEL_ID}")
     print(f"  저장 위치: {local_dir}")
+    print(f"  예상 크기: ~2.7 GB (safetensors 포함)")
 
     snapshot_download(
-        repo_id   = model_id,
-        local_dir = str(local_dir),
-        ignore_patterns = ["*.msgpack", "*.h5", "flax_model*", "rust_model*"],
+        repo_id         = HF_MODEL_ID,
+        local_dir       = str(local_dir),
+        ignore_patterns = [
+            "*.msgpack", "*.h5",
+            "flax_model*", "rust_model*", "tf_model*",
+        ],
     )
+    marker.touch()
     _ok("다운로드 완료")
     return local_dir
 
 
-# ── 2. PyTorch → ONNX ────────────────────────────────────────────────────────
+# ── 2. ONNX 변환 (optimum) ───────────────────────────────────────────────────
 
-def _find_pt_file(model_dir: Path) -> Path:
-    """디렉토리에서 PyTorch 가중치 파일을 찾습니다."""
-    for pattern in ("*.pt", "*.pth", "pytorch_model.bin", "model.safetensors"):
-        files = sorted(model_dir.rglob(pattern))
-        if files:
-            return files[0]
-    raise FileNotFoundError(
-        f"PyTorch 가중치 파일을 찾을 수 없습니다: {model_dir}\n"
-        f"  지원 형식: *.pt, *.pth, pytorch_model.bin, model.safetensors\n"
-        f"  --model-id 또는 --checkpoint 옵션을 확인하세요."
-    )
-
-
-def convert_torch(model_dir: Path | None, checkpoint: Path | None, onnx_path: Path) -> None:
-    """PyTorch 모델을 ONNX로 변환합니다."""
+def _check_optimum() -> None:
     try:
-        import torch
+        import optimum  # noqa
+        from optimum.exporters.onnx import main_export  # noqa
     except ImportError:
-        raise SystemExit("torch 미설치: pip install torch")
+        raise SystemExit(
+            "optimum 미설치:\n"
+            "  pip install 'optimum[exporters]'"
+        )
 
-    # ── 모델 로드 ─────────────────────────────────────────────────────────────
-    # transformers AutoModel 로드 시도 (HuggingFace 표준 형식)
-    model = None
-    if model_dir and (model_dir / "config.json").exists():
-        try:
-            from transformers import AutoModel
-            print(f"  transformers.AutoModel 로드 중: {model_dir}")
-            model = AutoModel.from_pretrained(str(model_dir), trust_remote_code=True)
-            model.eval()
-            _ok("AutoModel 로드 완료")
-        except Exception as e:
-            print(f"  AutoModel 로드 실패 ({e}), 직접 로드 시도...")
 
-    # 직접 .pt 파일 로드 (fallback)
-    if model is None:
-        pt_file = checkpoint or _find_pt_file(model_dir)
-        print(f"  state_dict 로드 중: {pt_file}")
+def convert_to_onnx(model_dir: Path, onnx_out: Path) -> None:
+    _check_optimum()
 
-        # ── 여기서 모델 아키텍처를 직접 정의해야 합니다 ──────────────────────
-        # 보유한 GLM-OCR 모델의 클래스를 아래에서 import 하거나 정의하세요.
-        # 예:
-        #   from glm_ocr_model import GlmOcrRecognizer
-        #   model = GlmOcrRecognizer(num_classes=NUM_CLASSES)
-        #   model.load_state_dict(torch.load(pt_file, map_location="cpu"))
-        #
-        # 현재는 state_dict 직접 로드를 지원하지 않습니다.
-        # HuggingFace 형식(config.json + pytorch_model.bin)으로 배포된 모델을
-        # 사용하거나, --paddle 옵션으로 PaddleOCR 모델을 변환하세요.
+    encoder_path = onnx_out / ENCODER_NAME
+    decoder_path = onnx_out / DECODER_MERGED_NAME
+
+    if encoder_path.exists() and decoder_path.exists():
+        _skip(f"ONNX 파일 이미 존재: {onnx_out}")
+        return
+
+    onnx_out.mkdir(parents=True, exist_ok=True)
+
+    # ── optimum Python API 로 내보내기 ────────────────────────────────────────
+    # trust_remote_code 필수 (GLM-OCR 는 커스텀 아키텍처)
+    try:
+        from optimum.exporters.onnx import main_export
+
+        print(f"  입력  : {model_dir}")
+        print(f"  출력  : {onnx_out}")
+        print(f"  opset : {OPSET}")
+        print(f"  task  : image-text-to-text")
+        print("  (GLM-OCR 는 2.65 GB — 변환에 수 분이 소요됩니다)")
+
+        main_export(
+            model_name_or_path = str(model_dir),
+            output             = str(onnx_out),
+            task               = "image-text-to-text",
+            opset              = OPSET,
+            trust_remote_code  = True,
+            monolith           = False,   # encoder / decoder 분리
+            no_post_process    = False,
+        )
+        _ok("optimum ONNX 변환 완료")
+
+    except Exception as e:
+        _warn(f"optimum Python API 실패: {e}")
+        _warn("optimum-cli 로 재시도합니다...")
+        _convert_via_cli(model_dir, onnx_out)
+
+
+def _convert_via_cli(model_dir: Path, onnx_out: Path) -> None:
+    """optimum-cli 를 subprocess 로 실행 (Python API 실패 시 폴백)."""
+    cmd = [
+        sys.executable, "-m", "optimum.exporters.onnx",
+        "--model",             str(model_dir),
+        "--task",              "image-text-to-text",
+        "--opset",             str(OPSET),
+        "--trust-remote-code",
+        str(onnx_out),
+    ]
+    print(f"  실행: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=False)
+    if result.returncode != 0:
         raise RuntimeError(
-            "PyTorch 직접 로드는 모델 클래스가 필요합니다.\n"
-            "  1. HuggingFace 형식 모델(config.json 포함)을 사용하세요.\n"
-            "  2. PaddleOCR 모델이라면 --paddle 옵션을 사용하세요."
+            "optimum-cli 변환 실패.\n"
+            f"  직접 실행:\n"
+            f"  optimum-cli export onnx \\\n"
+            f"    --model {model_dir} \\\n"
+            f"    --task image-text-to-text \\\n"
+            f"    --opset {OPSET} \\\n"
+            f"    --trust-remote-code \\\n"
+            f"    {onnx_out}"
+        )
+    _ok("optimum-cli 변환 완료")
+
+
+# ── 3. INT8 양자화 ───────────────────────────────────────────────────────────
+
+def quantize(onnx_dir: Path, out_dir: Path) -> None:
+    """ONNX 모델을 INT8 동적 양자화합니다 (~650 MB)."""
+    try:
+        from optimum.onnxruntime import ORTQuantizer
+        from optimum.onnxruntime.configuration import AutoQuantizationConfig
+    except ImportError:
+        raise SystemExit(
+            "optimum[onnxruntime] 미설치:\n"
+            "  pip install 'optimum[onnxruntime]'"
         )
 
-    # ── ONNX 내보내기 ─────────────────────────────────────────────────────────
-    onnx_path.parent.mkdir(parents=True, exist_ok=True)
-    dummy = torch.zeros(1, 3, REC_H, REC_MAX_W)
-
-    print(f"  ONNX 내보내기: opset={OPSET}, 입력 {list(dummy.shape)}")
-    torch.onnx.export(
-        model,
-        dummy,
-        str(onnx_path),
-        opset_version     = OPSET,
-        input_names       = ["input"],
-        output_names      = ["output"],
-        dynamic_axes      = {
-            "input":  {3: "width"},   # 너비만 동적 (높이는 고정)
-            "output": {1: "seq_len"}, # 시퀀스 길이 동적
-        },
-        do_constant_folding = True,
+    out_dir.mkdir(parents=True, exist_ok=True)
+    qconfig = AutoQuantizationConfig.avx512_vnni(
+        is_static    = False,
+        per_channel  = False,
+        reduce_range = False,
     )
 
-    mb = onnx_path.stat().st_size / 1024 / 1024
-    _ok(f"ONNX 저장: {onnx_path.name}  ({mb:.2f} MB)")
+    for onnx_file in onnx_dir.glob("*.onnx"):
+        q_path = out_dir / onnx_file.name
+        if q_path.exists():
+            _skip(f"이미 양자화됨: {q_path.name}")
+            continue
 
-
-# ── 3. PaddleOCR → ONNX ──────────────────────────────────────────────────────
-
-def convert_paddle(paddle_dir: Path, onnx_path: Path) -> None:
-    """PaddleOCR 추론 모델을 ONNX로 변환합니다."""
-    try:
-        import paddle2onnx
-    except ImportError:
-        raise SystemExit("paddle2onnx 미설치: pip install paddlepaddle paddle2onnx==2.1.0")
-
-    # pdmodel 파일 탐색
-    candidates = list(paddle_dir.rglob("inference.pdmodel")) + \
-                 list(paddle_dir.rglob("model.pdmodel"))
-    if not candidates:
-        raise FileNotFoundError(
-            f"inference.pdmodel 파일을 찾을 수 없습니다: {paddle_dir}"
+        print(f"  양자화: {onnx_file.name}")
+        quantizer = ORTQuantizer.from_pretrained(str(onnx_dir), file_name=onnx_file.name)
+        quantizer.quantize(
+            save_dir              = str(out_dir),
+            quantization_config   = qconfig,
         )
-    model_file  = candidates[0]
-    param_file  = model_file.with_name(
-        "inference.pdiparams" if model_file.name == "inference.pdmodel" else "model.pdiparams"
-    )
-    if not param_file.exists():
-        raise FileNotFoundError(f"pdiparams 파일 없음: {param_file}")
+        mb = q_path.stat().st_size / 1024 / 1024
+        _ok(f"{q_path.name}  ({mb:.1f} MB)")
 
-    onnx_path.parent.mkdir(parents=True, exist_ok=True)
-    print(f"  paddle2onnx 변환: {model_file.name} → {onnx_path.name}")
-
-    paddle2onnx.export(
-        model_filename  = str(model_file),
-        params_filename = str(param_file),
-        save_file       = str(onnx_path),
-        opset_version   = OPSET,
-    )
-
-    if not onnx_path.exists():
-        raise RuntimeError(f"ONNX 파일이 생성되지 않았습니다: {onnx_path}")
-
-    mb = onnx_path.stat().st_size / 1024 / 1024
-    _ok(f"ONNX 저장: {onnx_path.name}  ({mb:.2f} MB)")
+    # 설정 파일 복사 (tokenizer 등)
+    for f in onnx_dir.iterdir():
+        if f.suffix not in (".onnx",) and not (out_dir / f.name).exists():
+            shutil.copy2(f, out_dir / f.name)
 
 
-# ── 4. 어휘 사전 생성 ────────────────────────────────────────────────────────
+# ── 4. 설정 파일 복사 ────────────────────────────────────────────────────────
 
-def _read_vocab_txt(vocab_file: Path) -> list[str]:
-    """한 줄에 한 문자씩 적힌 텍스트 vocab 파일을 읽습니다."""
-    lines = vocab_file.read_text(encoding="utf-8").splitlines()
-    return [ln.rstrip("\n") for ln in lines]
-
-
-def _read_vocab_json(vocab_file: Path) -> list[str]:
-    """JSON 형식 vocab 파일을 읽습니다. {id: char} 또는 [char, ...] 형식 지원."""
-    data = json.loads(vocab_file.read_text(encoding="utf-8"))
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        return [data[str(i)] for i in range(len(data))]
-    raise ValueError(f"지원되지 않는 vocab JSON 형식: {vocab_file}")
-
-
-def _find_vocab_in_yaml(model_dir: Path) -> list[str] | None:
-    """PaddleOCR inference.yml 에서 character_dict 를 읽습니다."""
-    try:
-        import yaml
-    except ImportError:
-        return None
-
-    yml_files = list(model_dir.rglob("inference.yml"))
-    if not yml_files:
-        return None
-
-    cfg = yaml.safe_load(yml_files[0].read_text(encoding="utf-8"))
-    chars = (
-        cfg.get("PostProcess", {}).get("character_dict") or
-        cfg.get("Global", {}).get("character_dict_path")
-    )
-    if isinstance(chars, list):
-        return chars
-    if isinstance(chars, str):
-        dict_path = model_dir / chars
-        if dict_path.exists():
-            return _read_vocab_txt(dict_path)
-    return None
+def copy_config_files(hf_dir: Path, onnx_dir: Path) -> None:
+    """tokenizer, preprocessor_config 등 설정 파일을 ONNX 디렉토리로 복사합니다."""
+    config_files = [
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "preprocessor_config.json",
+        "generation_config.json",
+        "special_tokens_map.json",
+        "config.json",
+    ]
+    for name in config_files:
+        src = hf_dir / name
+        dst = onnx_dir / name
+        if src.exists() and not dst.exists():
+            shutil.copy2(src, dst)
+            _ok(f"설정 복사: {name}")
 
 
-def build_vocab_json(
-    vocab_source: Path | None,
-    model_dir:    Path | None,
-    out_path:     Path,
-) -> None:
-    """glm_vocab.json 을 생성합니다.
+# ── 5. glm_vocab.json 생성 ───────────────────────────────────────────────────
 
-    glm-pipeline.ts 가 기대하는 형식:
-      { "charTable": ["a", "b", ...], "blankIdx": 0 }
+def build_glm_vocab(onnx_dir: Path, public_dir: Path) -> None:
+    """tokenizer.json 에서 vocab 을 추출해 public 에 복사합니다.
 
-    blank(CTC 공백) 은 index 0 으로 고정합니다.
-    실제 문자는 index 1 부터 시작합니다.
+    glm-pipeline.ts 는 tokenizer.json 을 직접 사용하므로
+    별도 glm_vocab.json 변환 없이 파일만 복사합니다.
     """
-    if out_path.exists():
-        _skip(f"어휘 사전 이미 존재: {out_path.name}")
+    src = onnx_dir / "tokenizer.json"
+    if not src.exists():
+        _warn("tokenizer.json 없음 — vocab 복사 생략")
         return
-
-    char_list: list[str] | None = None
-
-    # 1순위: 명시적으로 지정한 vocab 파일
-    if vocab_source and vocab_source.exists():
-        ext = vocab_source.suffix.lower()
-        if ext == ".json":
-            char_list = _read_vocab_json(vocab_source)
-        else:
-            char_list = _read_vocab_txt(vocab_source)
-        _ok(f"vocab 로드: {vocab_source.name}  ({len(char_list)}개)")
-
-    # 2순위: 모델 디렉토리의 inference.yml (PaddleOCR)
-    if char_list is None and model_dir:
-        char_list = _find_vocab_in_yaml(model_dir)
-        if char_list:
-            _ok(f"vocab (inference.yml에서 추출)  ({len(char_list)}개)")
-
-    # 3순위: 모델 디렉토리의 vocab 파일 자동 탐색
-    if char_list is None and model_dir:
-        for pattern in ("vocab.txt", "char_dict.txt", "dict.txt", "characters.txt",
-                        "vocab.json", "tokenizer.json"):
-            files = list(model_dir.rglob(pattern))
-            if files:
-                ext = files[0].suffix.lower()
-                char_list = _read_vocab_json(files[0]) if ext == ".json" else _read_vocab_txt(files[0])
-                _ok(f"vocab 로드: {files[0].name}  ({len(char_list)}개)")
-                break
-
-    if char_list is None:
-        print()
-        print("  ⚠ 어휘 사전 파일을 찾지 못했습니다.")
-        print("    --vocab 옵션으로 직접 파일 경로를 지정하세요.")
-        print("    예: python convert_glm_ocr.py --vocab path/to/vocab.txt")
-        print("    (glm_vocab.json 없이도 앱 실행은 되나, charDict.json 으로 폴백됩니다.)")
-        return
-
-    # blank 토큰이 이미 0번이면 그대로, 없으면 맨 앞에 삽입
-    blank_idx = 0
-    if char_list[0] not in ("", "<blank>", "blank"):
-        char_list = [""] + char_list   # index 0 = blank
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(
-        json.dumps({"charTable": char_list, "blankIdx": blank_idx},
-                   ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    _ok(f"glm_vocab.json 저장: {out_path}  ({len(char_list)}개 항목)")
+    dst = public_dir / "tokenizer.json"
+    if not dst.exists():
+        shutil.copy2(src, dst)
+        kb = dst.stat().st_size / 1024
+        _ok(f"tokenizer.json 복사  ({kb:.0f} KB)")
+    else:
+        _skip("tokenizer.json 이미 존재")
 
 
-# ── 5. ONNX 검증 ─────────────────────────────────────────────────────────────
+# ── 6. ONNX 검증 ─────────────────────────────────────────────────────────────
 
-def verify_onnx(onnx_path: Path) -> None:
-    """ONNX 모델의 입출력 shape 를 확인합니다."""
+def verify(onnx_dir: Path) -> None:
     try:
         import onnxruntime as ort
         import numpy as np
     except ImportError:
-        print("  onnxruntime 미설치 — 검증 생략")
+        _warn("onnxruntime 미설치 — 검증 생략")
         return
 
-    try:
-        import onnx
-        model = onnx.load(str(onnx_path))
-        onnx.checker.check_model(model)
-    except Exception as e:
-        _fail(f"ONNX 그래프 검증 실패: {e}")
-        return
-
-    sess = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
-    inp  = sess.get_inputs()[0]
-    out  = sess.get_outputs()[0]
-    print(f"  입력  : {inp.name}  shape={inp.shape}  dtype={inp.type}")
-    print(f"  출력  : {out.name}  shape={out.shape}  dtype={out.type}")
-
-    # 실제 추론 테스트
-    import numpy as np
-    dummy = np.zeros((1, 3, REC_H, REC_MAX_W), dtype=np.float32)
-    result = sess.run([out.name], {inp.name: dummy})
-    o_shape = result[0].shape
-    print(f"  추론 결과 shape: {o_shape}")
-
-    if len(o_shape) != 3 or o_shape[0] != 1:
-        _fail(f"출력 shape 이 예상([1, T, num_classes])과 다릅니다: {o_shape}")
-    else:
-        _ok(f"검증 통과  (num_classes={o_shape[2]}, time_steps={o_shape[1]})")
+    for name in (ENCODER_NAME, DECODER_MERGED_NAME):
+        path = onnx_dir / name
+        if not path.exists():
+            _warn(f"파일 없음: {name}")
+            continue
+        try:
+            sess   = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+            inputs = [f"{i.name}: {i.shape}" for i in sess.get_inputs()]
+            outputs= [f"{o.name}: {o.shape}" for o in sess.get_outputs()]
+            mb     = path.stat().st_size / 1024 / 1024
+            _ok(f"{name}  ({mb:.1f} MB)")
+            for s in inputs:  print(f"      입력  {s}")
+            for s in outputs: print(f"      출력  {s}")
+        except Exception as e:
+            _fail(f"{name} 검증 실패: {e}")
 
 
-# ── 6. public/models 복사 ────────────────────────────────────────────────────
+# ── 7. public/models/glm-ocr 복사 ───────────────────────────────────────────
 
-def copy_to_public(onnx_path: Path, vocab_path: Path) -> None:
-    """변환된 파일을 웹 앱의 public/models/ 디렉토리로 복사합니다."""
-    if not PUBLIC_MODELS.exists():
-        print(f"  public/models 경로 없음 — 수동 복사 필요: {PUBLIC_MODELS}")
-        return
+def copy_to_public(src_dir: Path, dst_dir: Path) -> None:
+    dst_dir.mkdir(parents=True, exist_ok=True)
 
-    for src in (onnx_path, vocab_path):
+    copy_targets = list(src_dir.glob("*.onnx")) + [
+        src_dir / "tokenizer.json",
+        src_dir / "tokenizer_config.json",
+        src_dir / "preprocessor_config.json",
+        src_dir / "generation_config.json",
+        src_dir / "config.json",
+    ]
+
+    for src in copy_targets:
         if not src.exists():
             continue
-        dst = PUBLIC_MODELS / src.name
+        dst = dst_dir / src.name
+        if dst.exists():
+            _skip(f"이미 존재: {dst.name}")
+            continue
         shutil.copy2(src, dst)
         mb = dst.stat().st_size / 1024 / 1024
-        _ok(f"복사 완료: {dst}  ({mb:.2f} MB)")
+        label = f"{mb:.1f} MB" if mb >= 0.1 else f"{dst.stat().st_size / 1024:.0f} KB"
+        _ok(f"{dst.name}  ({label})")
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="GLM-OCR 모델 다운로드 및 ONNX 변환",
+        description="zai-org/GLM-OCR 다운로드 + ONNX 변환",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    src = p.add_mutually_exclusive_group()
-    src.add_argument(
-        "--model-id", default=DEFAULT_HF_MODEL_ID, metavar="HF_REPO_ID",
-        help=f"HuggingFace 모델 ID (기본값: {DEFAULT_HF_MODEL_ID})",
-    )
-    src.add_argument(
-        "--paddle", metavar="DIR",
-        help="PaddleOCR 추론 모델 디렉토리 (inference.pdmodel 포함)",
-    )
-    src.add_argument(
-        "--checkpoint", metavar="FILE",
-        help="로컬 PyTorch 체크포인트 (.pt / .pth)",
+        epilog=__doc__,
     )
     p.add_argument(
-        "--vocab", metavar="FILE",
-        help="어휘 사전 파일 (.txt 또는 .json)",
+        "--download-only", action="store_true",
+        help="다운로드만 수행 (ONNX 변환 없음)",
+    )
+    p.add_argument(
+        "--skip-download", action="store_true",
+        help="다운로드 생략 (이미 hf_models/ 에 존재)",
+    )
+    p.add_argument(
+        "--quantize", action="store_true",
+        help="INT8 양자화 수행 (크기: ~2.65 GB → ~650 MB)",
+    )
+    p.add_argument(
+        "--use-quantized", action="store_true",
+        help="양자화된 모델을 public/ 에 복사",
     )
     p.add_argument(
         "--no-copy", action="store_true",
-        help="public/models 로 복사하지 않음",
+        help="public/models/glm-ocr 복사 생략",
     )
     return p.parse_args()
 
@@ -409,67 +362,61 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    onnx_path  = ONNX_DIR / "glm_ocr_rec.onnx"
-    vocab_path = ONNX_DIR / "glm_vocab.json"
-
     _hr()
-    print("GLM-OCR ONNX 변환")
-    print(f"  입력 스펙: [1, 3, {REC_H}, {REC_MAX_W}]  opset={OPSET}")
-    print(f"  출력 경로: {ONNX_DIR}")
+    print("zai-org/GLM-OCR  ONNX 변환 파이프라인")
+    print(f"  HF 모델 ID : {HF_MODEL_ID}")
+    print(f"  로컬 저장  : {HF_LOCAL}")
+    print(f"  ONNX 출력  : {ONNX_DIR}")
+    print(f"  퍼블릭     : {PUBLIC_MODELS}")
     _hr()
 
-    model_dir: Path | None = None
+    # ── 다운로드 ─────────────────────────────────────────────────────────────
+    if not args.skip_download:
+        _hr("1. HuggingFace 다운로드")
+        download(HF_LOCAL)
+
+    if args.download_only:
+        _hr("완료 (다운로드만)")
+        return
 
     # ── ONNX 변환 ─────────────────────────────────────────────────────────────
-    if onnx_path.exists():
-        mb = onnx_path.stat().st_size / 1024 / 1024
-        _skip(f"ONNX 파일 이미 존재: {onnx_path.name}  ({mb:.2f} MB)")
-    else:
-        if args.paddle:
-            # PaddleOCR 경로
-            print("── PaddleOCR 모델 변환")
-            paddle_dir = Path(args.paddle)
-            model_dir  = paddle_dir
-            convert_paddle(paddle_dir, onnx_path)
+    _hr("2. ONNX 변환 (optimum)")
+    convert_to_onnx(HF_LOCAL, ONNX_DIR)
 
-        elif args.checkpoint:
-            # 로컬 체크포인트 경로
-            print("── 로컬 체크포인트 변환")
-            convert_torch(None, Path(args.checkpoint), onnx_path)
+    _hr("3. 설정 파일 복사")
+    copy_config_files(HF_LOCAL, ONNX_DIR)
 
-        else:
-            # HuggingFace 다운로드 + PyTorch 변환
-            print(f"── HuggingFace 다운로드: {args.model_id}")
-            hf_local = SCRIPT_DIR / "hf_models" / args.model_id.replace("/", "__")
-            model_dir = download_hf(args.model_id, hf_local)
-            print()
-            print("── PyTorch → ONNX 변환")
-            convert_torch(model_dir, None, onnx_path)
-
-    print()
-
-    # ── 어휘 사전 생성 ─────────────────────────────────────────────────────────
-    print("── 어휘 사전(glm_vocab.json) 생성")
-    vocab_src = Path(args.vocab) if args.vocab else None
-    build_vocab_json(vocab_src, model_dir, vocab_path)
-    print()
+    # ── INT8 양자화 ───────────────────────────────────────────────────────────
+    if args.quantize:
+        _hr("4. INT8 양자화")
+        quantize(ONNX_DIR, ONNX_INT8_DIR)
+        copy_config_files(HF_LOCAL, ONNX_INT8_DIR)
 
     # ── ONNX 검증 ─────────────────────────────────────────────────────────────
-    if onnx_path.exists():
-        print("── ONNX 모델 검증")
-        verify_onnx(onnx_path)
-        print()
+    _hr("5. ONNX 검증")
+    verify_dir = ONNX_INT8_DIR if (args.quantize and ONNX_INT8_DIR.exists()) else ONNX_DIR
+    verify(verify_dir)
 
-    # ── public/models 복사 ────────────────────────────────────────────────────
+    # ── public 복사 ───────────────────────────────────────────────────────────
     if not args.no_copy:
-        print("── public/models 복사")
-        copy_to_public(onnx_path, vocab_path)
-        print()
+        _hr("6. public/models/glm-ocr 복사")
+        src_dir = ONNX_INT8_DIR if args.use_quantized and ONNX_INT8_DIR.exists() else ONNX_DIR
+        copy_to_public(src_dir, PUBLIC_MODELS)
+        build_glm_vocab(src_dir, PUBLIC_MODELS)
 
+    # ── 최종 요약 ─────────────────────────────────────────────────────────────
     _hr()
     print("완료")
-    print(f"  ONNX  : {onnx_path}")
-    print(f"  vocab : {vocab_path}")
+    print()
+    files = {
+        ENCODER_NAME:        PUBLIC_MODELS / ENCODER_NAME,
+        DECODER_MERGED_NAME: PUBLIC_MODELS / DECODER_MERGED_NAME,
+        "tokenizer.json":    PUBLIC_MODELS / "tokenizer.json",
+    }
+    for name, path in files.items():
+        status = "✓" if path.exists() else "✗ 없음"
+        mb     = f"  ({path.stat().st_size/1024/1024:.1f} MB)" if path.exists() else ""
+        print(f"  {status}  {name}{mb}")
     _hr()
 
 

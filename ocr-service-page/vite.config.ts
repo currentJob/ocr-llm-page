@@ -36,7 +36,10 @@ export default defineConfig({
   base,
   plugins: [react(), ortPublicMjsStub],
   optimizeDeps: {
-    exclude: ['@huggingface/transformers', 'onnxruntime-web'],
+    // onnxruntime-web 는 제외하지 않음 — exclude 시 raw ESM 로드로 전환되어
+    // ort-wasm-simd-threaded.mjs (WASM bootstrap) 까지 public/ 에서
+    // 동적 import() 하려다 Vite 에 차단되면서 WASM 초기화가 실패함.
+    exclude: ['@huggingface/transformers'],
   },
   server: {
     headers: {

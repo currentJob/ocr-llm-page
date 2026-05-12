@@ -140,8 +140,16 @@ export class GlmOCR {
     )
 
     notify('GLM-OCR 인식 모델 로드 중...', 2)
+    const recUrl = `${base}models/glm_ocr_rec.onnx`
+    const recCheck = await fetch(recUrl, { method: 'HEAD' })
+    if (!recCheck.ok) {
+      throw new Error(
+        `GLM-OCR 모델 파일을 찾을 수 없습니다.\n` +
+        `public/models/glm_ocr_rec.onnx 파일을 추가해 주세요.`
+      )
+    }
     const rec = await ort.InferenceSession.create(
-      `${base}models/glm_ocr_rec.onnx`,
+      recUrl,
       { executionProviders: ['wasm'] },
     )
 

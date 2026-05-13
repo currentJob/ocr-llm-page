@@ -9,8 +9,14 @@ import {
 import { dbPostprocess } from './dbPostprocess'
 
 // WASM 파일은 setup_web_models.py 가 public/ 루트에 복사해 둠
+// ORT 1.26.0: Um() 함수가 항상 ort-wasm-simd-threaded.jsep.mjs 를 로드하는데
+// vite.config.ts stub 이 이를 no-op 으로 대체해 Bu=undefined 가 됨.
+// wasmPaths 를 객체로 지정해 base(.mjs/.wasm) 를 직접 사용, jsep 우회.
 ort.env.wasm.numThreads = 1
-ort.env.wasm.wasmPaths  = import.meta.env.BASE_URL
+ort.env.wasm.wasmPaths  = {
+  mjs:  `${import.meta.env.BASE_URL}ort-wasm-simd-threaded.mjs`,
+  wasm: `${import.meta.env.BASE_URL}ort-wasm-simd-threaded.wasm`,
+}
 
 // ── 타입 ─────────────────────────────────────────────────────────────────────
 

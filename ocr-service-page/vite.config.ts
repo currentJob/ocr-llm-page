@@ -18,11 +18,13 @@ const base = process.env.VITE_BASE_URL ?? '/'
  *   임포트가 깨지는 부작용이 있어 플러그인 방식을 사용한다.
  */
 /**
- * ORT 1.26.0 이 JSEP 모듈을 받은 뒤 module.default() 로 호출하기 때문에
- * 'export default undefined' 를 반환하면 undefined() → TypeError: g is not a function.
+ * ORT 1.26.0 은 Um() 내부에서 항상 ort-wasm-simd-threaded.jsep.mjs 를 로드한다.
+ * pipeline.ts 에서 wasmPaths.mjs 를 base(.mjs)로 명시해 jsep 를 우회하므로
+ * 이 stub 은 직접 트리거되지 않는다. 단, @huggingface/transformers 내부에서
+ * 의도치 않게 jsep/jspi/asyncify 변형을 import() 하려 할 때의 방어 목적으로 유지.
  *
- * 모듈 평가 시 즉시 throw 하면 dynamic import() 자체가 reject 되고,
- * ORT 내부 try-catch 가 이를 잡아 WASM 백엔드로 정상 폴백한다.
+ * ※ no-op async 함수: Bu=undefined → we() 실패를 유발하므로
+ *    throw 방식으로 변경해 ORT 내부 try-catch 가 WASM 초기화 실패로 처리하게 함.
  */
 const ortPublicMjsStub: Plugin = {
   name:    'ort-public-mjs-stub',
@@ -34,9 +36,8 @@ const ortPublicMjsStub: Plugin = {
   },
   load(id: string) {
     if (id === '\0ort-stub') {
-      // no-op async 함수를 export: import() 는 성공하고 ORT 가 default() 를 호출해도
-      // 아무 작업 없이 반환 → JSEP 초기화 미완료로 인식 → WASM 백엔드로 정상 진행
-      return 'export default async function() {}'
+      // throw 로 import() 자체를 reject → ORT try-catch 가 잡아 초기화 실패 처리
+      return 'throw new Error("ort-stub: jsep/jspi/asyncify backend not supported")'
     }
   },
 }

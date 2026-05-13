@@ -16,7 +16,7 @@
  * convert_glm_ocr.py 를 실행하면 위 파일이 자동 생성됩니다.
  */
 
-import * as ort from 'onnxruntime-web'
+import * as ort from './ort'
 import { preprocessDet, cropByBox } from './preprocess'
 import { dbPostprocess } from './dbPostprocess'
 import type { OcrItem, LoadProgress } from './pipeline'

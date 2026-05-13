@@ -45,13 +45,26 @@ const ortPublicMjsStub: Plugin = {
 export default defineConfig({
   base,
   plugins: [react(), ortPublicMjsStub],
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+  },
   optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'react-dom/client',
+      'react/jsx-dev-runtime',
+      'react/jsx-runtime',
+    ],
     // onnxruntime-web 는 제외하지 않음 — exclude 시 raw ESM 로드로 전환되어
     // ort-wasm-simd-threaded.mjs (WASM bootstrap) 까지 public/ 에서
     // 동적 import() 하려다 Vite 에 차단되면서 WASM 초기화가 실패함.
     exclude: ['@huggingface/transformers'],
   },
   server: {
+    hmr: {
+      host: '127.0.0.1',
+    },
     headers: {
       'Cross-Origin-Opener-Policy':   'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',

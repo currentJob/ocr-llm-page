@@ -38,6 +38,8 @@ jobs:
         env:
           # 레포 이름을 base 경로로 사용 (예: /ocr/)
           VITE_BASE_URL: /${{ github.event.repository.name }}/
+          # 다른 사이트가 import 하는 lib/korean-ocr.mjs 는 모델을 이 절대 주소에서 받는다
+          VITE_LIB_BASE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
         run: npm run build
 
       - name: Setup Pages

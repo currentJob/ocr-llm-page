@@ -26,7 +26,7 @@ const base = process.env.VITE_BASE_URL ?? '/'
  * ※ no-op async 함수: Bu=undefined → we() 실패를 유발하므로
  *    throw 방식으로 변경해 ORT 내부 try-catch 가 WASM 초기화 실패로 처리하게 함.
  */
-const ortPublicMjsStub: Plugin = {
+export const ortPublicMjsStub: Plugin = {
   name:    'ort-public-mjs-stub',
   enforce: 'pre',
   resolveId(id: string) {

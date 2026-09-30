@@ -1,5 +1,6 @@
 import type { ChangeEvent } from 'react'
 import Icon from './Icon'
+import { ThemeControls } from './ThemeControls'
 
 interface Props {
   historyCount:    number
@@ -34,6 +35,7 @@ export default function AppHeader({ historyCount, historyOpen, busy, onFiles, on
         </button>
       </nav>
       <div className="cj-header-actions">
+        <ThemeControls />
         <a className="cj-pill" href="https://github.com/currentJob/ocr-llm-page" target="_blank" rel="noreferrer" aria-label="소스 코드 (GitHub)">
           <Icon name="github" /><span className="cj-label">소스</span>
         </a>

@@ -2,7 +2,7 @@ import type React from 'react'
 
 /** 강조 색상·테마 전환 — city-walk-planner 헤더와 같은 자리. 클릭은 index.html 의 공통 스크립트가 처리한다. */
 const ACCENTS: [string, string, string, string][] = [
-  ['green', '초록', '#245548', '#7cc4a6'], ['sky', '하늘', '#0b5f8a', '#7cc6ee'], ['yellow', '노랑', '#7a5600', '#f0c75e'],
+  ['sky', '하늘', '#0b5f8a', '#7cc6ee'], ['green', '초록', '#245548', '#7cc4a6'], ['yellow', '노랑', '#7a5600', '#f0c75e'],
   ['purple', '보라', '#5f3bab', '#b9a3f5'], ['orange', '주황', '#a8431b', '#f4a27c'], ['rose', '장미', '#a82d5c', '#f39bbd'],
 ]
 

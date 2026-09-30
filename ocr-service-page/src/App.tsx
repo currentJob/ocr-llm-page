@@ -7,6 +7,7 @@ import { useHistory }     from './hooks/useHistory'
 import { useCamera }      from './hooks/useCamera'
 import { useLlm }         from './hooks/useLlm'
 import Header             from './components/Header'
+import AppHeader          from './components/AppHeader'
 import CameraOverlay      from './components/CameraOverlay'
 import HistoryPanel       from './components/HistoryPanel'
 import UploadArea         from './components/UploadArea'
@@ -182,12 +183,18 @@ export default function App() {
 
   return (
     <div className="app">
+      <AppHeader
+        historyCount={hist.history.length}
+        historyOpen={hist.showHistory}
+        busy={phase === 'loading-model'}
+        onFiles={processFiles}
+        onCameraOpen={camera.startCamera}
+        onToggleHistory={() => hist.setShowHistory(s => !s)}
+      />
       <Header
         modelType={modelType}
         phase={phase}
-        history={hist.history}
         onSwitchModel={switchModel}
-        onToggleHistory={() => hist.setShowHistory(s => !s)}
       />
 
       {camera.showCamera && (

@@ -1,11 +1,10 @@
-import type { OcrModelType, Phase, HistoryEntry } from '../types'
+import type { OcrModelType, Phase } from '../types'
+import Icon from './Icon'
 
 interface Props {
   modelType:       OcrModelType
   phase:           Phase
-  history:         HistoryEntry[]
   onSwitchModel:   (t: OcrModelType) => void
-  onToggleHistory: () => void
 }
 
 const MODEL_LABELS: Record<OcrModelType, { label: string; title: string }> = {
@@ -13,13 +12,13 @@ const MODEL_LABELS: Record<OcrModelType, { label: string; title: string }> = {
   // 'glm-ocr':{ label: 'GLM-OCR', title: 'GLM-OCR ONNX 인식 모델' },
 }
 
-export default function Header({ modelType, phase, history, onSwitchModel, onToggleHistory }: Props) {
+export default function Header({ modelType, phase, onSwitchModel }: Props) {
   return (
-    <header className="header">
+    <section className="header" aria-label="소개">
       <div className="header-inner">
-        <p className="eyebrow">On-device · OCR + LLM</p>
-        <h1>Korean OCR</h1>
-        <p>정적 페이지 서비스로 별도의 서버 없이 한국어 텍스트 인식</p>
+        <p className="eyebrow"><Icon name="shield" /> On-device · OCR + LLM</p>
+        <h1>사진 속 한국어를, 바로 텍스트로.</h1>
+        <p>서버 없이 이 브라우저에서 글자를 읽고 요약합니다. 사진은 기기 밖으로 나가지 않습니다.</p>
 
         <div className="model-selector">
           {(Object.entries(MODEL_LABELS) as [OcrModelType, { label: string; title: string }][]).map(([t, { label, title }]) => (
@@ -35,15 +34,7 @@ export default function Header({ modelType, phase, history, onSwitchModel, onTog
           ))}
         </div>
 
-        {history.length > 0 && (
-          <button className="history-toggle" onClick={onToggleHistory}>
-            <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clipRule="evenodd"/>
-            </svg>
-            히스토리 {history.length}
-          </button>
-        )}
       </div>
-    </header>
+    </section>
   )
 }

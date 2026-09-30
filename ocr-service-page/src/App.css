@@ -692,3 +692,10 @@ body {
   .image-actions { flex-direction: row; flex-wrap: wrap; }
   .image-actions > * { flex: 1 1 140px; }
 }
+
+/* 소개 영역 아이콘·제목 (상단 헤더는 index.html 의 공통 .cj-header 스타일) */
+.header .eyebrow { display: inline-flex; align-items: center; gap: 6px; }
+.header .eyebrow .cj-ic { width: 14px; height: 14px; }
+.header h1 { font-size: clamp(1.7rem, 4vw, 2.5rem); word-break: keep-all; text-wrap: balance; }
+.header p { word-break: keep-all; }
+@media (max-width: 768px) { .header h1 { font-size: 1.55rem; } }

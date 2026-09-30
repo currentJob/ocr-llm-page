@@ -40,6 +40,29 @@
       .cj-swatches button{width:34px;height:34px;min-height:0;margin:0;padding:0;border:3px solid var(--cj-surface);border-radius:50%;outline:1px solid var(--cj-line);background:var(--l);box-shadow:none;cursor:pointer}
       :root[data-theme=dark] .cj-swatches button{background:var(--d)}
       .cj-swatches button[aria-pressed=true]{outline:2px solid var(--cj-ink)}
+      /* App header — same look as city-walk-planner's header: logo mark, serif wordmark, icon nav with an accent underline. */
+      .cj-header{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:28px;height:64px;padding:0 max(24px,calc((100vw - 1180px)/2));background:color-mix(in srgb,var(--cj-paper) 94%,transparent);border-bottom:1px solid var(--cj-line);backdrop-filter:blur(10px);font-family:var(--cj-sans);box-sizing:border-box}
+      .cj-brand{display:flex;align-items:center;gap:10px;color:var(--cj-ink);text-decoration:none;font:600 19px/1.1 var(--cj-serif);letter-spacing:-.4px;white-space:nowrap}
+      .cj-brand-mark{display:grid;place-items:center;width:32px;height:32px;flex:none;border-radius:9px;background:var(--cj-accent);color:var(--cj-on-accent)}
+      .cj-brand-mark svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+      .cj-nav{display:flex;align-items:stretch;gap:26px;height:100%;margin:0 auto}
+      .cj-header .cj-nav :is(a,button,label){display:inline-flex;align-items:center;gap:7px;height:100%;min-height:0;margin:0;padding:0;border:0;border-bottom:2px solid transparent;border-radius:0;background:none;box-shadow:none;color:var(--cj-muted);font:500 14px var(--cj-sans);text-decoration:none;white-space:nowrap;cursor:pointer}
+      .cj-header .cj-nav :is(a,label):hover,.cj-header .cj-nav button:hover:not(:disabled){color:var(--cj-ink)}
+      .cj-header .cj-nav [aria-current],.cj-header .cj-nav [aria-pressed=true]{color:var(--cj-accent);border-bottom-color:var(--cj-accent);font-weight:700}
+      .cj-header .cj-nav button:disabled,.cj-header .cj-nav .is-disabled{opacity:.4;cursor:not-allowed}
+      .cj-ic{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+      .cj-header-actions{display:flex;align-items:center;gap:8px}
+      .cj-pill{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 14px;border:1px solid var(--cj-line);border-radius:999px;background:var(--cj-surface);color:var(--cj-ink);font:600 13px var(--cj-sans);text-decoration:none;white-space:nowrap}
+      .cj-pill:hover{border-color:var(--cj-accent);color:var(--cj-accent)}
+      .cj-badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:var(--cj-soft-2);color:var(--cj-accent);font:600 12px var(--cj-sans);white-space:nowrap}
+      @media (max-width:760px){
+        .cj-header{height:56px;gap:6px;padding:0 12px}
+        .cj-brand{font-size:17px}.cj-brand-mark{width:28px;height:28px}
+        .cj-nav{gap:2px;margin:0 0 0 auto}
+        .cj-nav .cj-label,.cj-pill .cj-label{display:none}
+        .cj-header .cj-nav :is(a,button,label){width:44px;justify-content:center;border-bottom-width:2px}
+        .cj-pill{width:40px;min-height:40px;padding:0;justify-content:center}
+      }
       @media (max-width:560px){.cj-long{display:none}.cj-projects{gap:8px;padding:0 10px}.cj-list{gap:9px}.cj-projects{--cj-ctl:28px}}
     </style>
   </head>

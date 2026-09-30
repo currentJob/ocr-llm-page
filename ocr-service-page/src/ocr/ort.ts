@@ -1,10 +1,27 @@
-import * as ort from 'onnxruntime-web/wasm'
+/**
+ * ONNX Runtime 로더. WebGPU 어댑터가 있으면 WebGPU 빌드(연산 대부분 GPU, 나머지 CPU),
+ * 없으면 WASM 빌드만 받는다. wasm 은 public/ 의 파일을 쓴다 — Vite 사전 번들 안에서는
+ * ORT 의 상대 경로 계산이 어긋나기 때문이다.
+ */
+export type Ort = typeof import('onnxruntime-web/wasm')
+export type Backend = 'webgpu' | 'wasm'
 
-// Keep ORT on the plain WASM backend. Supplying an mjs override points ORT at
-// public/*.mjs, which Vite refuses to import during dev.
-ort.env.wasm.numThreads = 1
-ort.env.wasm.wasmPaths = {
-  wasm: `${import.meta.env.BASE_URL}ort-wasm-simd-threaded.wasm`,
+async function hasWebGpu(): Promise<boolean> {
+  const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu
+  if (!gpu) return false
+  try { return !!(await gpu.requestAdapter()) } catch { return false }
 }
 
-export * from 'onnxruntime-web/wasm'
+export async function loadOrt(prefer?: Backend): Promise<{ ort: Ort; backend: Backend }> {
+  const base = import.meta.env.BASE_URL
+  if (prefer !== 'wasm' && await hasWebGpu()) {
+    const ort = await import('onnxruntime-web/webgpu') as unknown as Ort
+    ort.env.wasm.numThreads = 1
+    ort.env.wasm.wasmPaths = { wasm: `${base}ort-wasm-simd-threaded.asyncify.wasm` }
+    return { ort, backend: 'webgpu' }
+  }
+  const ort = await import('onnxruntime-web/wasm')
+  ort.env.wasm.numThreads = 1
+  ort.env.wasm.wasmPaths = { wasm: `${base}ort-wasm-simd-threaded.wasm` }
+  return { ort, backend: 'wasm' }
+}

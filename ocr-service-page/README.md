@@ -8,7 +8,7 @@
 
 | 부분 | 내용 |
 |---|---|
-| 글자 인식 | PP-OCRv5 한국어 파이프라인(문서 방향 → 텍스트 검출 → 줄 방향 → 인식), ONNX Runtime Web(WASM) |
+| 글자 인식 | PP-OCRv5 한국어 파이프라인(문서 방향 → 텍스트 검출 → 줄 방향 → 인식), ONNX Runtime Web. WebGPU 가 되면 GPU, 아니면 WASM(CPU) |
 | 요약 | Qwen2.5-0.5B-Instruct, Transformers.js (WebGPU 우선, 없으면 CPU) |
 | 화면 | React + TypeScript + Vite. 이미지 업로드·카메라 촬영, 영역 선택, 결과 검색·복사·내보내기, 기록 |
 
@@ -26,7 +26,7 @@ GitHub Pages 배포는 `.github/workflows/deploy.yml` 이 `main` push 때 합니
 
 ```js
 const { KoreanOCR } = await import('https://currentjob.github.io/ocr-llm-page/lib/korean-ocr.mjs')
-const ocr = await KoreanOCR.create((p) => console.log(p.step))   // 첫 사용 때 모델 약 30MB
+const ocr = await KoreanOCR.create((p) => console.log(p.step))   // 첫 사용 때 모델 약 30MB. 두 번째 인자로 { backend: 'wasm' } 등 지정 가능
 const items = await ocr.predict(imageElement)                     // [{ text, recScore, detScore, box }]
 ```
 

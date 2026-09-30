@@ -1,18 +1,10 @@
-import type { OcrModelType, Phase } from '../types'
 import Icon from './Icon'
 
 interface Props {
-  modelType:       OcrModelType
-  phase:           Phase
-  onSwitchModel:   (t: OcrModelType) => void
+  backend: string | null
 }
 
-const MODEL_LABELS: Record<OcrModelType, { label: string; title: string }> = {
-  ppocr:    { label: 'PP-OCR',  title: 'PP-OCRv5 한국어 특화 4단계 파이프라인' },
-  // 'glm-ocr':{ label: 'GLM-OCR', title: 'GLM-OCR ONNX 인식 모델' },
-}
-
-export default function Header({ modelType, phase, onSwitchModel }: Props) {
+export default function Header({ backend }: Props) {
   return (
     <section className="header" aria-label="소개">
       <div className="header-inner">
@@ -21,19 +13,13 @@ export default function Header({ modelType, phase, onSwitchModel }: Props) {
         <p>서버 없이 이 브라우저에서 글자를 읽고 요약합니다. 사진은 기기 밖으로 나가지 않습니다.</p>
 
         <div className="model-selector">
-          {(Object.entries(MODEL_LABELS) as [OcrModelType, { label: string; title: string }][]).map(([t, { label, title }]) => (
-            <button
-              key={t}
-              className={`model-btn${modelType === t ? ' active' : ''}`}
-              onClick={() => onSwitchModel(t)}
-              disabled={phase === 'loading-model'}
-              title={title}
-            >
-              {label}
-            </button>
-          ))}
+          <span className="model-btn active" title="PP-OCRv5 한국어 파이프라인 (문서 방향 → 검출 → 줄 방향 → 인식)">PP-OCRv5</span>
+          {backend && (
+            <span className="model-btn" title={backend === 'webgpu' ? 'GPU 로 추론합니다' : '이 브라우저는 WebGPU 를 지원하지 않아 CPU 로 추론합니다'}>
+              {backend === 'webgpu' ? 'WebGPU' : 'CPU (WASM)'}
+            </span>
+          )}
         </div>
-
       </div>
     </section>
   )

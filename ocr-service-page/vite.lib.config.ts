@@ -19,7 +19,7 @@ export default defineConfig({
     outDir: 'dist/lib',
     emptyOutDir: true,
     // lib 모드는 wasm 을 base64 로 통째로 박아 34MB 가 된다. 일반 빌드로 진입점만 ES 모듈로 내보내면
-    // wasm 은 파일로 남고, 실제로는 위 base 의 ort-wasm-simd-threaded.wasm 을 받는다.
+    // wasm 은 파일로 남고, 실제로는 위 base 의 ort-wasm-simd-threaded(.asyncify).wasm 을 받는다.
     rollupOptions: {
       input: 'src/ocr/lib.ts',
       preserveEntrySignatures: 'strict',

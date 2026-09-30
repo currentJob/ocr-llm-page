@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { OcrItem, Phase, OcrModelType, LoadProgress, HistoryEntry } from './types'
+import type { OcrItem, Phase, LoadProgress, HistoryEntry } from './types'
 import { useOcrModel }    from './hooks/useOcrModel'
 import { useImage }       from './hooks/useImage'
 import { useRoi }         from './hooks/useRoi'
@@ -23,7 +23,7 @@ export default function App() {
   const [error,    setError]    = useState('')
   const [items,    setItems]    = useState<OcrItem[]>([])
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [modelType, setModelType] = useState<OcrModelType>('ppocr')
+  const [backend,   setBackend]   = useState<string | null>(null)
   const [progress,  setProgress]  = useState<LoadProgress | null>(null)
   const [currentFilename, setCurrentFilename] = useState('')
   const [threshold,   setThreshold]   = useState(0)
@@ -46,28 +46,22 @@ export default function App() {
   // ── 모델 로드 ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    loadOcrModel('ppocr')
+    loadOcrModel()
     return camera.stopOnUnmount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function loadOcrModel(type: OcrModelType, hadImage = false) {
+  async function loadOcrModel() {
     setPhase('loading-model')
     setProgress(null)
     try {
-      await loadModel(type, p => setProgress(p))
-      setPhase(hadImage ? 'roi' : 'ready')
+      await loadModel(p => setProgress(p))
+      setBackend(ocrRef.current?.backend ?? null)
+      setPhase('ready')
     } catch (e) {
       setError(String(e))
       setPhase('error')
     }
-  }
-
-  async function switchModel(type: OcrModelType) {
-    if (type === modelType || phase === 'loading-model') return
-    setModelType(type)
-    resetResults()
-    await loadOcrModel(type, image.imageUrl !== null)
   }
 
   // ── OCR 생명주기 ──────────────────────────────────────────────────────────
@@ -191,11 +185,7 @@ export default function App() {
         onCameraOpen={camera.startCamera}
         onToggleHistory={() => hist.setShowHistory(s => !s)}
       />
-      <Header
-        modelType={modelType}
-        phase={phase}
-        onSwitchModel={switchModel}
-      />
+      <Header backend={backend} />
 
       {camera.showCamera && (
         <CameraOverlay

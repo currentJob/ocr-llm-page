@@ -3,8 +3,6 @@ import type { LLMLoadProgress }       from './llm/engine'
 
 export type { OcrItem, LoadProgress, LLMLoadProgress }
 
-// export type OcrModelType = 'ppocr' | 'glm-ocr'
-export type OcrModelType = 'ppocr'
 export type Phase        = 'loading-model' | 'ready' | 'roi' | 'running' | 'done' | 'error'
 export type LlmStatus    = 'idle' | 'loading-model' | 'running' | 'done' | 'error'
 

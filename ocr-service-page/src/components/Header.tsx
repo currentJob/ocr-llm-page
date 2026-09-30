@@ -17,6 +17,7 @@ export default function Header({ modelType, phase, history, onSwitchModel, onTog
   return (
     <header className="header">
       <div className="header-inner">
+        <p className="eyebrow">On-device · OCR + LLM</p>
         <h1>Korean OCR</h1>
         <p>정적 페이지 서비스로 별도의 서버 없이 한국어 텍스트 인식</p>
 

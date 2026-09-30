@@ -17,6 +17,8 @@ export async function loadOrt(prefer?: Backend): Promise<{ ort: Ort; backend: Ba
   if (prefer !== 'wasm' && await hasWebGpu()) {
     const ort = await import('onnxruntime-web/webgpu') as unknown as Ort
     ort.env.wasm.numThreads = 1
+    // 모양 계산용 작은 연산을 CPU 에 두는 건 ORT 의 의도된 동작인데, 세션마다 경고를 찍어 끈다
+    ort.env.logLevel = 'error'
     ort.env.wasm.wasmPaths = { wasm: `${base}ort-wasm-simd-threaded.asyncify.wasm` }
     return { ort, backend: 'webgpu' }
   }

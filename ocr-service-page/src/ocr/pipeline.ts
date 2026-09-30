@@ -111,7 +111,7 @@ export class KoreanOCR {
       ...MODELS.map(m => get(`models/${m}.onnx`).then(r => r.arrayBuffer()).then(b => { tick(m); return new Uint8Array(b) })),
     ])
     const sessions: Session[] = []
-    for (const b of bytes) sessions.push(await ort.InferenceSession.create(b, { executionProviders: eps, graphOptimizationLevel: 'all' }))
+    for (const b of bytes) sessions.push(await ort.InferenceSession.create(b, { executionProviders: eps, graphOptimizationLevel: 'all', logSeverityLevel: 3 }))
     const gpu = backend === 'webgpu'
     const ocr = new KoreanOCR(ort, backend, sessions, dict as CharDict, {
       detMaxSide: options.detMaxSide ?? (gpu ? 1920 : 1600),
